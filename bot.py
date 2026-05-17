@@ -26,175 +26,112 @@ app = Client(
 
 lengths = {}
 running = {}
-locks = {}
 
-# =========================
-#      “УМНЫЕ” СЛОГИ
-# =========================
-
-syllables = [
-    "ka", "ne", "lo", "ra", "mi", "zo", "lu", "ta", "vo", "xi",
-    "no", "be", "sa", "re", "di", "fa", "go", "ha", "ja", "ko"
-]
-
-endings = ["x", "z", "a", "o", "y", "e", "n"]
+letters = "abcdefghijklmnopqrstuvwxyz"
 
 
 # =========================
-#   УМНАЯ ГЕНЕРАЦИЯ
+#   SMART GEN (быстро)
 # =========================
 
-def smart_username(length):
-
-    mode = random.randint(1, 4)
-
-    # 1. слоговая генерация (самая “человеческая”)
-    if mode == 1:
-        name = ""
-        while len(name) < length:
-            name += random.choice(syllables)
-        return name[:length]
-
-    # 2. симметрия (aabbaa / xyzyx)
-    if mode == 2:
-        half = length // 2
-        base = ''.join(random.choice("abcdefghijklmnopqrstuvwxyz") for _ in range(half))
-        if length % 2 == 0:
-            return base + base[::-1]
-        return base + random.choice("abcdefghijklmnopqrstuvwxyz") + base[::-1]
-
-    # 3. повторения (aabbx)
-    if mode == 3:
-        chars = random.choice("abcdefghijklmnopqrstuvwxyz")
-        return (chars * (length - 1)) + random.choice(endings)
-
-    # 4. бренд-стиль (nevo, zora, kaira)
-    if mode == 4:
-        base = random.choice(syllables) + random.choice(syllables)
-        return base[:length]
+def gen(l):
+    return ''.join(random.choice(letters) for _ in range(l))
 
 
 # =========================
-#   TELEGRAM CHECK
+#   CHECK (SAFE)
 # =========================
 
 async def check(username):
     try:
         await app.get_chat(username)
         return False
-
     except UsernameNotOccupied:
         return True
-
-    except UsernameInvalid:
-        return False
-
     except FloodWait as e:
         await asyncio.sleep(e.value)
         return False
-
     except:
         return False
 
 
 # =========================
-#   SEARCH ENGINE
+#   LOOP (СТАБИЛЬНЫЙ)
 # =========================
 
-async def worker(chat_id, message):
+async def loop(chat_id, msg):
 
-    async with locks[chat_id]:
+    while running.get(chat_id):
 
-        length = lengths.get(chat_id, 5)
+        username = gen(lengths.get(chat_id, 5))
 
-        while running.get(chat_id):
+        free = await check(username)
 
-            username = smart_username(length)
+        if free:
+            await msg.reply(f"✨ @{username}")
 
-            free = await check(username)
-
-            if free:
-                await message.reply(
-                    f"✨ LUXE SEARCH\n\n"
-                    f"🎉 Найден стильный username:\n"
-                    f"👤 @{username}"
-                )
-
-            await asyncio.sleep(0.7)
+        await asyncio.sleep(0.4)
 
 
 # =========================
-#       KEYBOARD
+#   KEYBOARD
 # =========================
 
 def kb():
     return ReplyKeyboardMarkup(
         [
-            ["✨ 5 символов", "💎 6 символов"],
-            ["🔥 7 символов"],
-            ["🚀 Начать", "🛑 Стоп"]
+            ["5", "6", "7"],
+            ["START", "STOP"]
         ],
         resize_keyboard=True
     )
 
 
 # =========================
-#        START
+#   START
 # =========================
 
 @app.on_message(filters.command("start"))
 async def start(_, m):
 
     lengths[m.chat.id] = 5
-    locks[m.chat.id] = asyncio.Lock()
 
     await m.reply(
-        "✨ LUXE SEARCH\n\n"
-        "Умный подбор красивых username\n\n"
-        "Выбери длину 👇",
+        "LUXE SEARCH\nREADY",
         reply_markup=kb()
     )
 
 
 # =========================
-#       HANDLER
+#   HANDLER
 # =========================
 
 @app.on_message(filters.text)
 async def h(_, m):
 
     chat_id = m.chat.id
-    text = m.text
+    t = m.text
 
-    if text == "✨ 5 символов":
-        lengths[chat_id] = 5
-        await m.reply("✨ 5 символов")
+    if t in ["5", "6", "7"]:
+        lengths[chat_id] = int(t)
+        await m.reply(f"OK {t}")
 
-    elif text == "💎 6 символов":
-        lengths[chat_id] = 6
-        await m.reply("💎 6 символов")
-
-    elif text == "🔥 7 символов":
-        lengths[chat_id] = 7
-        await m.reply("🔥 7 символов")
-
-    elif text == "🚀 Начать":
+    elif t == "START":
 
         if running.get(chat_id):
-            return await m.reply("⚠️ уже работает")
+            return
 
         running[chat_id] = True
 
-        await m.reply("🚀 запуск Luxe Search")
+        await m.reply("STARTED")
 
-        asyncio.create_task(worker(chat_id, m))
+        asyncio.create_task(loop(chat_id, m))
 
 
-    elif text == "🛑 Стоп":
-
+    elif t == "STOP":
         running[chat_id] = False
-        await m.reply("🛑 остановлено")
+        await m.reply("STOPPED")
 
 
-print("LUXE SEARCH SMART RUNNING ⚡")
+print("RUNNING")
 app.run()
