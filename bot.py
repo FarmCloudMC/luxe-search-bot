@@ -1,13 +1,12 @@
 import asyncio
 import random
 import string
-import aiohttp
 
 from pyrogram import Client, filters
-from pyrogram.types import ReplyKeyboardMarkup
+from pyrogram.errors import UsernameNotOccupied, UsernameInvalid, FloodWait
 
 # =========================
-#        LUXE SEARCH
+#      LUXE SEARCH
 # =========================
 
 API_ID = 32799796
@@ -26,103 +25,60 @@ app = Client(
 # =========================
 
 user_lengths = {}
-search_tasks = {}
+running = {}
 
 letters = string.ascii_lowercase
 
 
 # =========================
-#   USERNAME GENERATOR
+#   GENERATE USERNAME
 # =========================
 
-def generate_username(length):
+def gen(length):
     return ''.join(random.choice(letters) for _ in range(length))
 
 
 # =========================
-#  TELEGRAM CHECK (FIXED)
+#   CHECK TELEGRAM
 # =========================
 
-async def check_telegram(session, username):
-    url = f"https://t.me/{username}"
-
+async def is_free(username):
     try:
-        async with session.get(url) as r:
-            text = await r.text()
-
-            # если страница "not found" → свободен
-            if "sorry, this username is not found" in text.lower():
-                return True
-
-            if r.status == 404:
-                return True
-
-            return False
-
+        await app.get_chat(username)
+        return False  # занят
+    except UsernameNotOccupied:
+        return True   # свободен
+    except UsernameInvalid:
+        return False
+    except FloodWait as e:
+        await asyncio.sleep(e.value)
+        return False
     except:
         return False
 
 
 # =========================
-#  FRAGMENT CHECK (FIXED)
+#     SEARCH LOOP
 # =========================
 
-async def check_fragment(session, username):
-    url = f"https://fragment.com/username/{username}"
+async def search(chat_id, message, length):
 
-    try:
-        async with session.get(url) as r:
-            text = await r.text()
+    while running.get(chat_id):
 
-            if "available" in text.lower():
-                return True
+        tasks = []
 
-            if r.status == 404:
-                return True
+        for _ in range(5):
+            username = gen(length)
+            tasks.append((username, asyncio.create_task(is_free(username))))
 
-            return False
+        for username, task in tasks:
 
-    except:
-        return False
+            free = await task
 
+            if free and running.get(chat_id):
+                await message.reply(f"🎉 НАЙДЕНО\n\n👤 @{username}")
 
-# =========================
-#      KEYBOARD
-# =========================
-
-def keyboard():
-    return ReplyKeyboardMarkup(
-        [
-            ["✨ 5 символов", "💎 6 символов"],
-            ["🔥 7 символов"],
-            ["🚀 Начать поиск"],
-            ["🛑 Остановить"]
-        ],
-        resize_keyboard=True
-    )
-
-
-# =========================
-#        SEARCH LOOP
-# =========================
-
-async def search_loop(chat_id, message, length):
-
-    async with aiohttp.ClientSession() as session:
-
-        while search_tasks.get(chat_id):
-
-            username = generate_username(length)
-
-            tg = await check_telegram(session, username)
-            fr = await check_fragment(session, username)
-
-            if tg and fr:
-                await message.reply(
-                    f"🎉 НАЙДЕНО\n\n👤 @{username}"
-                )
-
-            await asyncio.sleep(0.7)
+        await asyncio.sleep(0.2)
 
 
 # =========================
@@ -135,8 +91,8 @@ async def start(_, message):
     user_lengths[message.chat.id] = 5
 
     await message.reply(
-        "✨ LUXE SEARCH\n\nВыбери длину и нажми старт",
-        reply_markup=keyboard()
+        "✨ LUXE SEARCH\n\n"
+        "Выбери длину и нажми старт"
     )
 
 
@@ -150,45 +106,37 @@ async def handler(_, message):
     chat_id = message.chat.id
     text = message.text
 
-    if text == "✨ 5 символов":
+    if text == "5":
         user_lengths[chat_id] = 5
-        await message.reply("✨ Выбрано 5 символов")
+        await message.reply("✨ 5 символов")
 
-    elif text == "💎 6 символов":
+    elif text == "6":
         user_lengths[chat_id] = 6
-        await message.reply("💎 Выбрано 6 символов")
+        await message.reply("💎 6 символов")
 
-    elif text == "🔥 7 символов":
+    elif text == "7":
         user_lengths[chat_id] = 7
-        await message.reply("🔥 Выбрано 7 символов")
+        await message.reply("🔥 7 символов")
 
-    elif text == "🚀 Начать поиск":
+    elif text.lower().startswith("старт") or "начать" in text.lower():
 
-        if search_tasks.get(chat_id):
+        if running.get(chat_id):
             return await message.reply("⚠️ Уже работает")
+
+        running[chat_id] = True
 
         length = user_lengths.get(chat_id, 5)
 
-        search_tasks[chat_id] = True
+        await message.reply(f"🚀 Поиск запущен ({length})")
 
-        await message.reply(f"🚀 Старт поиска ({length})")
-
-        task = asyncio.create_task(
-            search_loop(chat_id, message, length)
-        )
-
-        search_tasks[chat_id] = task
+        asyncio.create_task(search(chat_id, message, length))
 
 
-    elif text == "🛑 Остановить":
+    elif "стоп" in text.lower():
 
-        task = search_tasks.get(chat_id)
-
-        if task:
-            search_tasks[chat_id] = False
-
+        running[chat_id] = False
         await message.reply("🛑 Остановлено")
 
 
-print("LUXE SEARCH RUNNING")
+print("LUXE SEARCH RUNNING ⚡")
 app.run()
