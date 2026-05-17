@@ -1,6 +1,5 @@
 import asyncio
 import random
-import string
 
 from pyrogram import Client, filters
 from pyrogram.errors import UsernameNotOccupied, UsernameInvalid, FloodWait
@@ -29,28 +28,63 @@ lengths = {}
 running = {}
 locks = {}
 
-letters = string.ascii_lowercase
+# =========================
+#      “УМНЫЕ” СЛОГИ
+# =========================
+
+syllables = [
+    "ka", "ne", "lo", "ra", "mi", "zo", "lu", "ta", "vo", "xi",
+    "no", "be", "sa", "re", "di", "fa", "go", "ha", "ja", "ko"
+]
+
+endings = ["x", "z", "a", "o", "y", "e", "n"]
 
 
 # =========================
-#     USERNAME GEN
+#   УМНАЯ ГЕНЕРАЦИЯ
 # =========================
 
-def gen(length):
-    return ''.join(random.choice(letters) for _ in range(length))
+def smart_username(length):
+
+    mode = random.randint(1, 4)
+
+    # 1. слоговая генерация (самая “человеческая”)
+    if mode == 1:
+        name = ""
+        while len(name) < length:
+            name += random.choice(syllables)
+        return name[:length]
+
+    # 2. симметрия (aabbaa / xyzyx)
+    if mode == 2:
+        half = length // 2
+        base = ''.join(random.choice("abcdefghijklmnopqrstuvwxyz") for _ in range(half))
+        if length % 2 == 0:
+            return base + base[::-1]
+        return base + random.choice("abcdefghijklmnopqrstuvwxyz") + base[::-1]
+
+    # 3. повторения (aabbx)
+    if mode == 3:
+        chars = random.choice("abcdefghijklmnopqrstuvwxyz")
+        return (chars * (length - 1)) + random.choice(endings)
+
+    # 4. бренд-стиль (nevo, zora, kaira)
+    if mode == 4:
+        base = random.choice(syllables) + random.choice(syllables)
+        return base[:length]
 
 
 # =========================
-#   TELEGRAM CHECK SAFE
+#   TELEGRAM CHECK
 # =========================
 
 async def check(username):
     try:
         await app.get_chat(username)
-        return False  # занят
+        return False
 
     except UsernameNotOccupied:
-        return True   # свободен
+        return True
 
     except UsernameInvalid:
         return False
@@ -64,7 +98,7 @@ async def check(username):
 
 
 # =========================
-#      SEARCH ENGINE
+#   SEARCH ENGINE
 # =========================
 
 async def worker(chat_id, message):
@@ -75,19 +109,18 @@ async def worker(chat_id, message):
 
         while running.get(chat_id):
 
-            username = gen(length)
+            username = smart_username(length)
 
             free = await check(username)
 
-            # ❗ не спамим мусор — только результат
             if free:
                 await message.reply(
                     f"✨ LUXE SEARCH\n\n"
-                    f"🎉 Найден свободный username:\n"
+                    f"🎉 Найден стильный username:\n"
                     f"👤 @{username}"
                 )
 
-            await asyncio.sleep(0.6)  # защита от flood
+            await asyncio.sleep(0.7)
 
 
 # =========================
@@ -116,7 +149,9 @@ async def start(_, m):
     locks[m.chat.id] = asyncio.Lock()
 
     await m.reply(
-        "✨ LUXE SEARCH\n\nВыбери длину и нажми старт",
+        "✨ LUXE SEARCH\n\n"
+        "Умный подбор красивых username\n\n"
+        "Выбери длину 👇",
         reply_markup=kb()
     )
 
@@ -133,15 +168,15 @@ async def h(_, m):
 
     if text == "✨ 5 символов":
         lengths[chat_id] = 5
-        await m.reply("✨ выбрано 5")
+        await m.reply("✨ 5 символов")
 
     elif text == "💎 6 символов":
         lengths[chat_id] = 6
-        await m.reply("💎 выбрано 6")
+        await m.reply("💎 6 символов")
 
     elif text == "🔥 7 символов":
         lengths[chat_id] = 7
-        await m.reply("🔥 выбрано 7")
+        await m.reply("🔥 7 символов")
 
     elif text == "🚀 Начать":
 
@@ -150,7 +185,7 @@ async def h(_, m):
 
         running[chat_id] = True
 
-        await m.reply("🚀 Luxe Search запущен")
+        await m.reply("🚀 запуск Luxe Search")
 
         asyncio.create_task(worker(chat_id, m))
 
@@ -161,5 +196,5 @@ async def h(_, m):
         await m.reply("🛑 остановлено")
 
 
-print("LUXE SEARCH STABLE RUNNING ⚡")
+print("LUXE SEARCH SMART RUNNING ⚡")
 app.run()
