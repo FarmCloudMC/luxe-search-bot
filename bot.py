@@ -4,6 +4,7 @@ import string
 
 from pyrogram import Client, filters
 from pyrogram.errors import UsernameNotOccupied, UsernameInvalid, FloodWait
+from pyrogram.types import ReplyKeyboardMarkup
 
 # =========================
 #      LUXE SEARCH
@@ -21,17 +22,18 @@ app = Client(
 )
 
 # =========================
-#         DATA
+#        STATE
 # =========================
 
-user_lengths = {}
+lengths = {}
 running = {}
+locks = {}
 
 letters = string.ascii_lowercase
 
 
 # =========================
-#   GENERATE USERNAME
+#     USERNAME GEN
 # =========================
 
 def gen(length):
@@ -39,60 +41,83 @@ def gen(length):
 
 
 # =========================
-#   CHECK TELEGRAM
+#   TELEGRAM CHECK SAFE
 # =========================
 
-async def is_free(username):
+async def check(username):
     try:
         await app.get_chat(username)
         return False  # занят
+
     except UsernameNotOccupied:
         return True   # свободен
+
     except UsernameInvalid:
         return False
+
     except FloodWait as e:
         await asyncio.sleep(e.value)
         return False
+
     except:
         return False
 
 
 # =========================
-#     SEARCH LOOP
+#      SEARCH ENGINE
 # =========================
 
-async def search(chat_id, message, length):
+async def worker(chat_id, message):
 
-    while running.get(chat_id):
+    async with locks[chat_id]:
 
-        tasks = []
+        length = lengths.get(chat_id, 5)
 
-        for _ in range(5):
+        while running.get(chat_id):
+
             username = gen(length)
-            tasks.append((username, asyncio.create_task(is_free(username))))
 
-        for username, task in tasks:
+            free = await check(username)
 
-            free = await task
+            # ❗ не спамим мусор — только результат
+            if free:
+                await message.reply(
+                    f"✨ LUXE SEARCH\n\n"
+                    f"🎉 Найден свободный username:\n"
+                    f"👤 @{username}"
+                )
 
-            if free and running.get(chat_id):
-                await message.reply(f"🎉 НАЙДЕНО\n\n👤 @{username}")
-
-        await asyncio.sleep(0.2)
+            await asyncio.sleep(0.6)  # защита от flood
 
 
 # =========================
-#         START
+#       KEYBOARD
+# =========================
+
+def kb():
+    return ReplyKeyboardMarkup(
+        [
+            ["✨ 5 символов", "💎 6 символов"],
+            ["🔥 7 символов"],
+            ["🚀 Начать", "🛑 Стоп"]
+        ],
+        resize_keyboard=True
+    )
+
+
+# =========================
+#        START
 # =========================
 
 @app.on_message(filters.command("start"))
-async def start(_, message):
+async def start(_, m):
 
-    user_lengths[message.chat.id] = 5
+    lengths[m.chat.id] = 5
+    locks[m.chat.id] = asyncio.Lock()
 
-    await message.reply(
-        "✨ LUXE SEARCH\n\n"
-        "Выбери длину и нажми старт"
+    await m.reply(
+        "✨ LUXE SEARCH\n\nВыбери длину и нажми старт",
+        reply_markup=kb()
     )
 
 
@@ -101,42 +126,40 @@ async def start(_, message):
 # =========================
 
 @app.on_message(filters.text)
-async def handler(_, message):
+async def h(_, m):
 
-    chat_id = message.chat.id
-    text = message.text
+    chat_id = m.chat.id
+    text = m.text
 
-    if text == "5":
-        user_lengths[chat_id] = 5
-        await message.reply("✨ 5 символов")
+    if text == "✨ 5 символов":
+        lengths[chat_id] = 5
+        await m.reply("✨ выбрано 5")
 
-    elif text == "6":
-        user_lengths[chat_id] = 6
-        await message.reply("💎 6 символов")
+    elif text == "💎 6 символов":
+        lengths[chat_id] = 6
+        await m.reply("💎 выбрано 6")
 
-    elif text == "7":
-        user_lengths[chat_id] = 7
-        await message.reply("🔥 7 символов")
+    elif text == "🔥 7 символов":
+        lengths[chat_id] = 7
+        await m.reply("🔥 выбрано 7")
 
-    elif text.lower().startswith("старт") or "начать" in text.lower():
+    elif text == "🚀 Начать":
 
         if running.get(chat_id):
-            return await message.reply("⚠️ Уже работает")
+            return await m.reply("⚠️ уже работает")
 
         running[chat_id] = True
 
-        length = user_lengths.get(chat_id, 5)
+        await m.reply("🚀 Luxe Search запущен")
 
-        await message.reply(f"🚀 Поиск запущен ({length})")
-
-        asyncio.create_task(search(chat_id, message, length))
+        asyncio.create_task(worker(chat_id, m))
 
 
-    elif "стоп" in text.lower():
+    elif text == "🛑 Стоп":
 
         running[chat_id] = False
-        await message.reply("🛑 Остановлено")
+        await m.reply("🛑 остановлено")
 
 
-print("LUXE SEARCH RUNNING ⚡")
+print("LUXE SEARCH STABLE RUNNING ⚡")
 app.run()
