@@ -27,26 +27,45 @@ app = Client(
 user_lengths = {}
 running = {}
 
-# красивые части
+letters = "abcdefghijklmnopqrstuvwxyz"
+
+# ==================================================
+#              БОЛЬШЕ СЛОГОВ
+# ==================================================
+
 parts = [
+
     "lu", "xe", "zo", "ra", "ka",
     "mi", "no", "ta", "vo", "xi",
     "ne", "sa", "re", "di", "fa",
     "go", "ha", "ko", "la", "mo",
-    "ni", "ro", "za", "ve", "xo"
+    "ni", "ro", "za", "ve", "xo",
+
+    "zen", "vex", "luna", "nova",
+    "kira", "zoro", "nexo", "viro",
+    "lux", "vanta", "lyra", "nero",
+    "sora", "kairo", "velo", "zenix",
+    "aero", "astro", "onyx", "xeno",
+    "vena", "rave", "kova", "luro",
+    "vexo", "nori", "mira", "ziva",
+    "runa", "hex", "ony", "vori",
+    "lyon", "kexo", "vexo", "xora",
+    "feno", "seno", "vexo", "rizo"
+
 ]
 
-letters = "abcdefghijklmnopqrstuvwxyz"
-
 # ==================================================
-#             ГЕНЕРАЦИЯ USERNAME
+#          УМНАЯ ГЕНЕРАЦИЯ USERNAME
 # ==================================================
 
 def generate_username(length):
 
-    mode = random.randint(1, 4)
+    mode = random.randint(1, 5)
 
-    # бренд стиль
+    # ======================================
+    # БРЕНД СТИЛЬ
+    # ======================================
+
     if mode == 1:
 
         result = (
@@ -56,7 +75,10 @@ def generate_username(length):
 
         return result[:length]
 
-    # слоговый
+    # ======================================
+    # СЛОГОВЫЙ
+    # ======================================
+
     elif mode == 2:
 
         result = ""
@@ -66,7 +88,10 @@ def generate_username(length):
 
         return result[:length]
 
-    # повторения
+    # ======================================
+    # ПОВТОРЫ
+    # ======================================
+
     elif mode == 3:
 
         char = random.choice(letters)
@@ -75,8 +100,11 @@ def generate_username(length):
             char * (length - 1)
         ) + random.choice(letters)
 
-    # симметрия
-    else:
+    # ======================================
+    # СИММЕТРИЯ
+    # ======================================
+
+    elif mode == 4:
 
         half = length // 2
 
@@ -94,8 +122,25 @@ def generate_username(length):
             base[::-1]
         )
 
+    # ======================================
+    # СМЕШАННЫЙ СТИЛЬ
+    # ======================================
+
+    else:
+
+        result = (
+            random.choice(parts)[:2] +
+            ''.join(
+                random.choice(letters)
+                for _ in range(length - 4)
+            ) +
+            random.choice(parts)[:2]
+        )
+
+        return result[:length]
+
 # ==================================================
-#           ПРОВЕРКА TELEGRAM
+#        ПРОВЕРКА TELEGRAM (НОРМ)
 # ==================================================
 
 async def check_telegram(session, username):
@@ -104,27 +149,62 @@ async def check_telegram(session, username):
 
         url = f"https://t.me/{username}"
 
-        async with session.get(url) as r:
+        async with session.get(
+            url,
+            timeout=10
+        ) as r:
 
             text = await r.text()
 
             text = text.lower()
 
-            # свободный username
-            if (
-                "if you have telegram" not in text
-                and "preview channel" not in text
-                and "preview chat" not in text
-            ):
-                return True
+            # ==================================
+            # ЕСЛИ USERNAME ЗАНЯТ
+            # ==================================
+
+            occupied_signs = [
+
+                "view in telegram",
+                "preview channel",
+                "preview chat",
+                "send message",
+                "subscribers",
+                "members"
+
+            ]
+
+            for sign in occupied_signs:
+
+                if sign in text:
+                    return False
+
+            # ==================================
+            # ЕСЛИ СВОБОДЕН
+            # ==================================
+
+            free_signs = [
+
+                "if you have telegram",
+                "this channel can't be displayed",
+                "username is not occupied"
+
+            ]
+
+            for sign in free_signs:
+
+                if sign in text:
+                    return True
 
             return False
 
-    except:
+    except Exception as e:
+
+        print(f"TG ERROR: {e}")
+
         return False
 
 # ==================================================
-#           ПРОВЕРКА FRAGMENT
+#       ПРОВЕРКА FRAGMENT (НОРМ)
 # ==================================================
 
 async def check_fragment(session, username):
@@ -133,25 +213,52 @@ async def check_fragment(session, username):
 
         url = f"https://fragment.com/username/{username}"
 
-        async with session.get(url) as r:
+        async with session.get(
+            url,
+            timeout=10
+        ) as r:
 
             text = await r.text()
 
             text = text.lower()
 
-            if "available" in text:
-                return True
+            # ==================================
+            # ЗАНЯТ НА FRAGMENT
+            # ==================================
 
-            if r.status == 404:
+            busy_signs = [
+
+                "auction",
+                "owner",
+                "bids"
+
+            ]
+
+            for sign in busy_signs:
+
+                if sign in text:
+                    return False
+
+            # ==================================
+            # СВОБОДЕН
+            # ==================================
+
+            if (
+                "available" in text
+                or r.status == 404
+            ):
                 return True
 
             return False
 
-    except:
+    except Exception as e:
+
+        print(f"FRAGMENT ERROR: {e}")
+
         return False
 
 # ==================================================
-#                КЛАВИАТУРА
+#                 КЛАВИАТУРА
 # ==================================================
 
 def keyboard():
@@ -167,7 +274,7 @@ def keyboard():
     )
 
 # ==================================================
-#                   ПОИСК
+#                    ПОИСК
 # ==================================================
 
 async def search_loop(chat_id, message):
@@ -192,7 +299,12 @@ async def search_loop(chat_id, message):
                 username
             )
 
-            # только полностью свободные
+            print(f"TG: {tg} | FRAGMENT: {fr}")
+
+            # ==================================
+            # ТОЛЬКО ПОЛНОСТЬЮ СВОБОДНЫЕ
+            # ==================================
+
             if tg and fr:
 
                 await message.reply(
@@ -203,8 +315,8 @@ async def search_loop(chat_id, message):
 
 👤 @{username}
 
-📱 Telegram: свободен
-💎 Fragment: свободен
+📱 Telegram: ✅ свободен
+💎 Fragment: ✅ свободен
 """
                 )
 
@@ -233,7 +345,7 @@ async def start(_, message):
     )
 
 # ==================================================
-#                 ОБРАБОТКА
+#                  ОБРАБОТКА
 # ==================================================
 
 @app.on_message(filters.text)
@@ -280,7 +392,7 @@ async def handler(_, message):
             """
 🚀 Luxe Search запущен
 
-🔍 Начинаю поиск...
+🔍 Начинаю поиск стильных username...
 """
         )
 
