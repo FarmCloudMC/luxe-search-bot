@@ -1,0 +1,11 @@
+{
+  "products": [],
+  "cities": ["Рудный", "Костанай", "Качар", "Федоровка", "Лисаковск"],
+  "promocodes": [],
+  "users": {},
+  "orders": [],
+  "reviews": [],
+  "next_product_id": 1,
+  "next_order_id": 1,
+  "next_review_id": 1
+}
