@@ -1,6 +1,18 @@
 import asyncio
 import json
 import os
+from dotenv import load_dotenv
+
+# Загружаем переменные из .env файла
+load_dotenv()
+
+# Теперь читаем их
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+if not BOT_TOKEN:
+    raise ValueError("BOT_TOKEN не найден в .env файле")
+
+ADMIN_IDS = [int(id) for id in os.getenv("ADMIN_IDS", "").split(",") if id]
+OPERATOR_USERNAME = os.getenv("OPERATOR_USERNAME", "emdrug")
 from datetime import datetime, timedelta
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
@@ -10,9 +22,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 
 # ========== КОНФИГ ==========
-BOT_TOKEN = "8513166011:AAGUbH8sbP3TLNopzzlnMxWu1UBluYfI4EQ"
-ADMIN_ID = 8213390123
-OPERATOR_USERNAME = "emdrug"  # @emdrug
+OPERATOR_USERNAME = "emdrug"
 STORE_NAME = "Emerald Store"
 DATA_FILE = "emerald_store_data.json"
 CURRENCY = "₸"
@@ -28,8 +38,10 @@ def load_data():
         "promocodes": [],
         "users": {},
         "orders": [],
+        "reviews": [],         # список отзывов: {id, name, date, text}
         "next_product_id": 1,
-        "next_order_id": 1
+        "next_order_id": 1,
+        "next_review_id": 1
     }
     if not os.path.exists(DATA_FILE):
         return default_data
@@ -62,8 +74,8 @@ def user_keyboard():
     return types.ReplyKeyboardMarkup(
         keyboard=[
             [types.KeyboardButton(text="📦 Прайс"), types.KeyboardButton(text="👤 Профиль")],
-            [types.KeyboardButton(text="💰 Баланс"), types.KeyboardButton(text="🎟 Промокод")],
-            [types.KeyboardButton(text="📞 Оператор"), types.KeyboardButton(text="🛟 Саппорт")]
+            [types.KeyboardButton(text="📝 Отзывы"), types.KeyboardButton(text="🎟 Промокод")],
+            [types.KeyboardButton(text="🛟 Саппорт")]
         ],
         resize_keyboard=True
     )
@@ -74,9 +86,9 @@ def admin_keyboard():
             [types.KeyboardButton(text="➕ Добавить товар"), types.KeyboardButton(text="✏️ Редактировать товар")],
             [types.KeyboardButton(text="🗑 Удалить товар"), types.KeyboardButton(text="🏙️ Города")],
             [types.KeyboardButton(text="➕ Добавить баланс"), types.KeyboardButton(text="➖ Списать баланс")],
-            [types.KeyboardButton(text="🎫 Создать промокод"), types.KeyboardButton(text="📢 Рассылка")],
-            [types.KeyboardButton(text="📊 Статистика"), types.KeyboardButton(text="📦 Список товаров")],
-            [types.KeyboardButton(text="🔙 Выйти из админки")]
+            [types.KeyboardButton(text="✍️ Создать отзыв"), types.KeyboardButton(text="🎫 Создать промокод")],
+            [types.KeyboardButton(text="📢 Рассылка"), types.KeyboardButton(text="📊 Статистика")],
+            [types.KeyboardButton(text="📦 Список товаров"), types.KeyboardButton(text="🔙 Выйти из админки")]
         ],
         resize_keyboard=True
     )
@@ -90,7 +102,7 @@ def add_cities_keyboard(selected_cities):
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
 def is_admin(user_id):
-    return user_id == ADMIN_ID
+    return user_id in ADMIN_IDS
 
 # ========== FSM СОСТОЯНИЯ ==========
 class AddProduct(StatesGroup):
@@ -125,10 +137,13 @@ class BalanceOperation(StatesGroup):
     amount = State()
     operation = State()  # "add" or "remove"
 
+class ReviewCreation(StatesGroup):
+    name = State()
+    text = State()
+    date = State()       # дата в формате ДД.ММ.ГГГГ, можно авто
+
 # ========== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ==========
 async def send_order_notification_to_admin(order_id, user_id, product_name, price, city):
-    """Отправляет админу уведомление о новом заказе с кнопкой подтверждения"""
-    # Формируем ссылку на пользователя (если username есть)
     user_link = f"tg://user?id={user_id}"
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="✅ Подтвердить заказ", callback_data=f"confirm_order_{order_id}")]
@@ -142,10 +157,13 @@ async def send_order_notification_to_admin(order_id, user_id, product_name, pric
         f"🕒 Время: {datetime.now().strftime('%d.%m.%Y %H:%M')}\n\n"
         f"Нажмите кнопку ниже, чтобы подтвердить заказ."
     )
-    await bot.send_message(ADMIN_ID, text, parse_mode="Markdown", reply_markup=keyboard)
+    for admin_id in ADMIN_IDS:
+        try:
+            await bot.send_message(admin_id, text, parse_mode="Markdown", reply_markup=keyboard)
+        except:
+            pass
 
 async def update_order_status(order_id, new_status, user_id=None, notify_user=True):
-    """Обновляет статус заказа и оповещает пользователя"""
     order = next((o for o in data["orders"] if o["id"] == order_id), None)
     if not order:
         return
@@ -250,7 +268,7 @@ async def product_selected(callback: CallbackQuery):
         return
     # Списание средств
     data["users"][user_id]["balance"] -= price
-    # Генерируем номер заказа
+    # Генерация заказа
     order_id = data["next_order_id"]
     data["next_order_id"] += 1
     order = {
@@ -266,7 +284,7 @@ async def product_selected(callback: CallbackQuery):
     data["orders"].append(order)
     data["users"][user_id]["orders"].append(order_id)
     save_data(data)
-    # Уведомление админу
+    # Уведомление админам
     await send_order_notification_to_admin(order_id, callback.from_user.id, product["name"], price, city)
     # Ответ пользователю
     await callback.message.edit_text(
@@ -302,13 +320,18 @@ async def confirm_order(callback: CallbackQuery):
     )
     await callback.answer()
 
-# ---------- Остальные пользовательские кнопки ----------
-@dp.message(F.text == "💰 Баланс")
-async def show_balance(message: Message):
-    user_id = str(message.from_user.id)
-    balance = data["users"].get(user_id, {}).get("balance", 0)
-    await message.answer(f"💰 Ваш текущий баланс: **{balance} {CURRENCY}**", parse_mode="Markdown")
+# ---------- Отзывы ----------
+@dp.message(F.text == "📝 Отзывы")
+async def show_reviews(message: Message):
+    if not data["reviews"]:
+        await message.answer("📝 Пока нет отзывов. Будьте первым!")
+        return
+    text = "🌟 **Отзывы наших клиентов:**\n\n"
+    for rev in data["reviews"][-10:]:  # последние 10
+        text += f"👤 *{rev['name']}*  📅 {rev['date']}\n📝 {rev['text']}\n\n"
+    await message.answer(text, parse_mode="Markdown")
 
+# ---------- Остальные пользовательские кнопки ----------
 @dp.message(F.text == "👤 Профиль")
 async def profile(message: Message):
     user_id = str(message.from_user.id)
@@ -351,10 +374,6 @@ async def promo_enter(message: Message):
             await msg.answer("❌ Промокод просрочен.")
             return
         await msg.answer(f"🎉 Промокод **{code}** активирован! Скидка {promo['discount']}% на следующий заказ.")
-
-@dp.message(F.text == "📞 Оператор")
-async def operator(message: Message):
-    await message.answer(f"📞 Наш оператор: @{OPERATOR_USERNAME}")
 
 @dp.message(F.text == "🛟 Саппорт")
 async def support(message: Message):
@@ -641,7 +660,7 @@ async def add_city_name(message: Message, state: FSMContext):
     await message.answer(f"✅ Город **{city_name}** добавлен.")
     await state.clear()
 
-# ---------- Добавление и списание баланса ----------
+# ---------- Добавление/списание баланса ----------
 @dp.message(F.text == "➕ Добавить баланс")
 async def add_balance_start(message: Message, state: FSMContext):
     if not is_admin(message.from_user.id):
@@ -662,7 +681,7 @@ async def remove_balance_start(message: Message, state: FSMContext):
 async def balance_operation_amount(message: Message, state: FSMContext):
     parts = message.text.strip().split()
     if len(parts) != 2 or not parts[1].isdigit():
-        await message.answer("Неверный формат. Введите ID и сумму через пробел.\nПример: `8213390123 5000`")
+        await message.answer("Неверный формат. Введите ID и сумму через пробел.")
         return
     user_id = parts[0]
     amount = int(parts[1])
@@ -686,7 +705,6 @@ async def balance_operation_amount(message: Message, state: FSMContext):
         action_text = f"списано **{amount} {CURRENCY}**"
     save_data(data)
     await message.answer(f"✅ Пользователю `{user_id}` {action_text}. Новый баланс: {data['users'][user_id]['balance']} {CURRENCY}", parse_mode="Markdown")
-    # Уведомляем пользователя
     try:
         if operation == "add":
             await bot.send_message(int(user_id), f"💰 Ваш баланс пополнен на **{amount} {CURRENCY}**! Текущий баланс: {data['users'][user_id]['balance']} {CURRENCY}", parse_mode="Markdown")
@@ -695,6 +713,51 @@ async def balance_operation_amount(message: Message, state: FSMContext):
     except:
         pass
     await state.clear()
+
+# ---------- Создание фейкового отзыва ----------
+@dp.message(F.text == "✍️ Создать отзыв")
+async def create_review_start(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    await message.answer("Введите **имя/ник** отправителя отзыва (например, 'Алексей'):")
+    await state.set_state(ReviewCreation.name)
+
+@dp.message(ReviewCreation.name)
+async def review_name(message: Message, state: FSMContext):
+    await state.update_data(name=message.text)
+    await message.answer("Введите **текст отзыва**:")
+    await state.set_state(ReviewCreation.text)
+
+@dp.message(ReviewCreation.text)
+async def review_text(message: Message, state: FSMContext):
+    await state.update_data(text=message.text)
+    await message.answer("Введите **дату** (в формате ДД.ММ.ГГГГ) или отправьте 'сегодня' для автоматической подстановки:")
+    await state.set_state(ReviewCreation.date)
+
+@dp.message(ReviewCreation.date)
+async def review_date(message: Message, state: FSMContext):
+    date_str = message.text.strip()
+    if date_str.lower() == "сегодня":
+        date_str = datetime.now().strftime("%d.%m.%Y")
+    # простая проверка формата
+    try:
+        datetime.strptime(date_str, "%d.%m.%Y")
+    except:
+        await message.answer("❌ Неверный формат даты. Используйте ДД.ММ.ГГГГ или 'сегодня'.")
+        return
+    data_state = await state.get_data()
+    new_id = data["next_review_id"]
+    data["next_review_id"] += 1
+    review = {
+        "id": new_id,
+        "name": data_state["name"],
+        "text": data_state["text"],
+        "date": date_str
+    }
+    data["reviews"].append(review)
+    save_data(data)
+    await state.clear()
+    await message.answer(f"✅ Отзыв от **{review['name']}** добавлен!", parse_mode="Markdown", reply_markup=admin_keyboard())
 
 # ---------- Рассылка ----------
 @dp.message(F.text == "📢 Рассылка")
@@ -728,6 +791,7 @@ async def admin_stats(message: Message):
     products_count = len(data["products"])
     promocodes = len(data["promocodes"])
     total_balance = sum(u["balance"] for u in data["users"].values())
+    reviews_count = len(data["reviews"])
     text = (
         f"📊 **Статистика {STORE_NAME}**\n\n"
         f"👥 Пользователей: {total_users}\n"
@@ -735,7 +799,8 @@ async def admin_stats(message: Message):
         f"💰 Выручка: {total_revenue} {CURRENCY}\n"
         f"📦 Товаров: {products_count}\n"
         f"🎟 Промокодов: {promocodes}\n"
-        f"💎 Общий баланс пользователей: {total_balance} {CURRENCY}"
+        f"💎 Общий баланс пользователей: {total_balance} {CURRENCY}\n"
+        f"📝 Отзывов: {reviews_count}"
     )
     await message.answer(text, parse_mode="Markdown")
 
