@@ -2,12 +2,17 @@ import asyncio
 import random
 
 from pyrogram import Client, filters
-from pyrogram.errors import UsernameNotOccupied, UsernameInvalid, FloodWait
+from pyrogram.errors import (
+    UsernameNotOccupied,
+    UsernameInvalid,
+    FloodWait
+)
+
 from pyrogram.types import ReplyKeyboardMarkup
 
-# =========================
-#      LUXE SEARCH
-# =========================
+# ==================================================
+#                 ✨ LUXE SEARCH ✨
+# ==================================================
 
 API_ID = 32799796
 API_HASH = "b7b9ebff2da0c27f5c666224d21cb5b5"
@@ -20,118 +25,280 @@ app = Client(
     bot_token=BOT_TOKEN
 )
 
-# =========================
-#        STATE
-# =========================
+# ==================================================
+#                     ДАННЫЕ
+# ==================================================
 
-lengths = {}
+user_lengths = {}
 running = {}
 
 letters = "abcdefghijklmnopqrstuvwxyz"
 
+# ==================================================
+#            КРАСИВЫЕ СЛОГИ / СЛОВА
+# ==================================================
 
-# =========================
-#   SMART GEN (быстро)
-# =========================
+parts = [
+    "lu", "xe", "zo", "ra", "ka", "mi", "no",
+    "ta", "vo", "xi", "ne", "sa", "re", "di",
+    "fa", "go", "ha", "ko", "la", "mo", "ni"
+]
 
-def gen(l):
-    return ''.join(random.choice(letters) for _ in range(l))
+endings = [
+    "x", "z", "y", "n", "o", "a"
+]
 
+# ==================================================
+#          УМНАЯ ГЕНЕРАЦИЯ USERNAME
+# ==================================================
 
-# =========================
-#   CHECK (SAFE)
-# =========================
+def generate_username(length):
 
-async def check(username):
+    mode = random.randint(1, 4)
+
+    # ==========================================
+    # БРЕНД-СТИЛЬ (luxe, zora, nexo)
+    # ==========================================
+
+    if mode == 1:
+
+        name = random.choice(parts) + random.choice(parts)
+
+        return name[:length]
+
+    # ==========================================
+    # СЛОГОВЫЙ СТИЛЬ
+    # ==========================================
+
+    elif mode == 2:
+
+        result = ""
+
+        while len(result) < length:
+            result += random.choice(parts)
+
+        return result[:length]
+
+    # ==========================================
+    # ПОВТОРЕНИЯ
+    # ==========================================
+
+    elif mode == 3:
+
+        char = random.choice(letters)
+
+        return (char * (length - 1)) + random.choice(endings)
+
+    # ==========================================
+    # СИММЕТРИЯ
+    # ==========================================
+
+    else:
+
+        half = length // 2
+
+        base = ''.join(
+            random.choice(letters)
+            for _ in range(half)
+        )
+
+        if length % 2 == 0:
+            return base + base[::-1]
+
+        return (
+            base +
+            random.choice(letters) +
+            base[::-1]
+        )
+
+# ==================================================
+#           ПРОВЕРКА USERNAME
+# ==================================================
+
+async def check_username(username):
+
     try:
+
         await app.get_chat(username)
+
         return False
+
     except UsernameNotOccupied:
+
         return True
+
+    except UsernameInvalid:
+
+        return False
+
     except FloodWait as e:
+
         await asyncio.sleep(e.value)
+
         return False
+
     except:
+
         return False
 
+# ==================================================
+#               КЛАВИАТУРА
+# ==================================================
 
-# =========================
-#   LOOP (СТАБИЛЬНЫЙ)
-# =========================
+def keyboard():
 
-async def loop(chat_id, msg):
-
-    while running.get(chat_id):
-
-        username = gen(lengths.get(chat_id, 5))
-
-        free = await check(username)
-
-        if free:
-            await msg.reply(f"✨ @{username}")
-
-        await asyncio.sleep(0.4)
-
-
-# =========================
-#   KEYBOARD
-# =========================
-
-def kb():
     return ReplyKeyboardMarkup(
         [
-            ["5", "6", "7"],
-            ["START", "STOP"]
+            ["✨ 5 символов", "💎 6 символов"],
+            ["🔥 7 символов"],
+            ["🚀 Начать поиск"],
+            ["🛑 Остановить"]
         ],
         resize_keyboard=True
     )
 
+# ==================================================
+#               ПОИСК
+# ==================================================
 
-# =========================
-#   START
-# =========================
+async def search_loop(chat_id, message):
+
+    while running.get(chat_id):
+
+        length = user_lengths.get(chat_id, 5)
+
+        username = generate_username(length)
+
+        free = await check_username(username)
+
+        # ======================================
+        # ТОЛЬКО СВОБОДНЫЕ
+        # ======================================
+
+        if free:
+
+            await message.reply(
+                f"""
+✨ LUXE SEARCH
+
+🎉 Найден свободный username
+
+👤 @{username}
+
+💎 Статус: свободен
+"""
+            )
+
+        # ======================================
+        # АНТИ FLOOD
+        # ======================================
+
+        await asyncio.sleep(0.8)
+
+# ==================================================
+#                 START
+# ==================================================
 
 @app.on_message(filters.command("start"))
-async def start(_, m):
+async def start(_, message):
 
-    lengths[m.chat.id] = 5
+    user_lengths[message.chat.id] = 5
 
-    await m.reply(
-        "LUXE SEARCH\nREADY",
-        reply_markup=kb()
+    text = """
+✨ Добро пожаловать в Luxe Search
+
+🔍 Умный поиск красивых Telegram username
+💎 Генерация стильных username
+⚡ Проверка через Telegram API
+
+Выбери длину username ниже 👇
+"""
+
+    await message.reply(
+        text,
+        reply_markup=keyboard()
     )
 
-
-# =========================
-#   HANDLER
-# =========================
+# ==================================================
+#              ОБРАБОТЧИК
+# ==================================================
 
 @app.on_message(filters.text)
-async def h(_, m):
+async def handler(_, message):
 
-    chat_id = m.chat.id
-    t = m.text
+    chat_id = message.chat.id
+    text = message.text
 
-    if t in ["5", "6", "7"]:
-        lengths[chat_id] = int(t)
-        await m.reply(f"OK {t}")
+    # ==========================================
+    # ВЫБОР ДЛИНЫ
+    # ==========================================
 
-    elif t == "START":
+    if text == "✨ 5 символов":
+
+        user_lengths[chat_id] = 5
+
+        await message.reply(
+            "✨ Установлено: 5 символов"
+        )
+
+    elif text == "💎 6 символов":
+
+        user_lengths[chat_id] = 6
+
+        await message.reply(
+            "💎 Установлено: 6 символов"
+        )
+
+    elif text == "🔥 7 символов":
+
+        user_lengths[chat_id] = 7
+
+        await message.reply(
+            "🔥 Установлено: 7 символов"
+        )
+
+    # ==========================================
+    # СТАРТ
+    # ==========================================
+
+    elif text == "🚀 Начать поиск":
 
         if running.get(chat_id):
-            return
+
+            return await message.reply(
+                "⚠️ Поиск уже запущен"
+            )
 
         running[chat_id] = True
 
-        await m.reply("STARTED")
+        await message.reply(
+            """
+🚀 Luxe Search запущен
 
-        asyncio.create_task(loop(chat_id, m))
+🔍 Начинаю поиск красивых username...
+"""
+        )
 
+        asyncio.create_task(
+            search_loop(chat_id, message)
+        )
 
-    elif t == "STOP":
+    # ==========================================
+    # СТОП
+    # ==========================================
+
+    elif text == "🛑 Остановить":
+
         running[chat_id] = False
-        await m.reply("STOPPED")
 
+        await message.reply(
+            "🛑 Поиск остановлен"
+        )
 
-print("RUNNING")
+# ==================================================
+#                   RUN
+# ==================================================
+
+print("✨ LUXE SEARCH RUNNING ✨")
+
 app.run()
