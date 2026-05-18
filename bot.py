@@ -326,7 +326,7 @@ async def show_reviews(message: Message):
     if not data["reviews"]:
         await message.answer("📝 Пока нет отзывов. Будьте первым!")
         return
-    text = "🌟 **Отзывы наших клиентов:**\n\n"
+    text = "🌟 **Отзывы наших клиентов:**\n**Чтобы оставить отзыв пишите оператору.**\n\n"
     for rev in data["reviews"][-10:]:  # последние 10
         text += f"👤 *{rev['name']}*  📅 {rev['date']}\n📝 {rev['text']}\n\n"
     await message.answer(text, parse_mode="Markdown")
