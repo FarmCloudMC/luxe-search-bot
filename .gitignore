@@ -1,0 +1,7 @@
+.env
+emerald_store_data.json
+__pycache__/
+*.pyc
+*.log
+.idea/
+.vscode/
