@@ -12,7 +12,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 # ========== КОНФИГ ==========
 BOT_TOKEN = "8513166011:AAGUbH8sbP3TLNopzzlnMxWu1UBluYfI4EQ"
 ADMIN_ID = 8213390123
-OPERATOR_USERNAME = "emdrug"
+OPERATOR_USERNAME = "emdrug"  # @emdrug
 STORE_NAME = "Emerald Store"
 DATA_FILE = "emerald_store_data.json"
 CURRENCY = "₸"
@@ -41,14 +41,14 @@ def load_data():
     for key, default_value in default_data.items():
         if key not in loaded:
             loaded[key] = default_value
-    # Дополнительно: у каждого товара должен быть ключ "cities"
     for p in loaded.get("products", []):
         if "cities" not in p:
             p["cities"] = loaded["cities"].copy()
-    # У каждого пользователя должен быть баланс
     for uid, u_data in loaded.get("users", {}).items():
         if "balance" not in u_data:
             u_data["balance"] = 0
+        if "orders" not in u_data:
+            u_data["orders"] = []
     return loaded
 
 def save_data(data):
@@ -57,13 +57,13 @@ def save_data(data):
 
 data = load_data()
 
-# ========== КЛАВИАТУРЫ (reply) ==========
+# ========== КЛАВИАТУРЫ ==========
 def user_keyboard():
     return types.ReplyKeyboardMarkup(
         keyboard=[
             [types.KeyboardButton(text="📦 Прайс"), types.KeyboardButton(text="👤 Профиль")],
             [types.KeyboardButton(text="💰 Баланс"), types.KeyboardButton(text="🎟 Промокод")],
-            [types.KeyboardButton(text="📞 Оператор"), types.KeyboardButton(text="❓ Помощь")]
+            [types.KeyboardButton(text="📞 Оператор"), types.KeyboardButton(text="🛟 Саппорт")]
         ],
         resize_keyboard=True
     )
@@ -72,8 +72,9 @@ def admin_keyboard():
     return types.ReplyKeyboardMarkup(
         keyboard=[
             [types.KeyboardButton(text="➕ Добавить товар"), types.KeyboardButton(text="✏️ Редактировать товар")],
-            [types.KeyboardButton(text="🏙️ Города"), types.KeyboardButton(text="🎫 Создать промокод")],
-            [types.KeyboardButton(text="➕ Добавить баланс"), types.KeyboardButton(text="📢 Рассылка")],
+            [types.KeyboardButton(text="🗑 Удалить товар"), types.KeyboardButton(text="🏙️ Города")],
+            [types.KeyboardButton(text="➕ Добавить баланс"), types.KeyboardButton(text="➖ Списать баланс")],
+            [types.KeyboardButton(text="🎫 Создать промокод"), types.KeyboardButton(text="📢 Рассылка")],
             [types.KeyboardButton(text="📊 Статистика"), types.KeyboardButton(text="📦 Список товаров")],
             [types.KeyboardButton(text="🔙 Выйти из админки")]
         ],
@@ -104,6 +105,9 @@ class EditProduct(StatesGroup):
     new_value = State()
     cities = State()
 
+class DeleteProduct(StatesGroup):
+    select_id = State()
+
 class PromocodeState(StatesGroup):
     code = State()
     discount = State()
@@ -116,23 +120,46 @@ class CityManage(StatesGroup):
     action = State()
     name = State()
 
-class AddBalanceState(StatesGroup):
+class BalanceOperation(StatesGroup):
     user_id = State()
     amount = State()
+    operation = State()  # "add" or "remove"
 
 # ========== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ==========
 async def send_order_notification_to_admin(order_id, user_id, product_name, price, city):
-    """Отправляет админу уведомление о новом заказе"""
+    """Отправляет админу уведомление о новом заказе с кнопкой подтверждения"""
+    # Формируем ссылку на пользователя (если username есть)
+    user_link = f"tg://user?id={user_id}"
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Подтвердить заказ", callback_data=f"confirm_order_{order_id}")]
+    ])
     text = (
         f"🆕 **НОВЫЙ ЗАКАЗ #{order_id}**\n\n"
-        f"👤 Пользователь: {user_id}\n"
+        f"👤 Покупатель: [user]({user_link}) (ID: `{user_id}`)\n"
         f"📦 Товар: {product_name}\n"
         f"💰 Сумма: {price} {CURRENCY}\n"
         f"🏙️ Город: {city}\n"
         f"🕒 Время: {datetime.now().strftime('%d.%m.%Y %H:%M')}\n\n"
-        f"✅ Баланс списан. Ожидайте обработки."
+        f"Нажмите кнопку ниже, чтобы подтвердить заказ."
     )
-    await bot.send_message(ADMIN_ID, text, parse_mode="Markdown")
+    await bot.send_message(ADMIN_ID, text, parse_mode="Markdown", reply_markup=keyboard)
+
+async def update_order_status(order_id, new_status, user_id=None, notify_user=True):
+    """Обновляет статус заказа и оповещает пользователя"""
+    order = next((o for o in data["orders"] if o["id"] == order_id), None)
+    if not order:
+        return
+    order["status"] = new_status
+    save_data(data)
+    if notify_user and user_id:
+        status_text = "принят и находится в обработке" if new_status == "подтверждён" else new_status
+        await bot.send_message(
+            user_id,
+            f"📬 **Статус заказа #{order_id} обновлён!**\n\n"
+            f"Текущий статус: *{status_text}*.\n"
+            f"Спасибо, что выбрали {STORE_NAME}!",
+            parse_mode="Markdown"
+        )
 
 # ========== ОБРАБОТЧИКИ ==========
 @dp.message(Command("start"))
@@ -163,8 +190,14 @@ async def show_cities(message: Message):
         return
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=city, callback_data=f"city_{city}")] for city in data["cities"]
-    ])
+    ] + [[InlineKeyboardButton(text="❌ Отмена", callback_data="cancel_city_selection")]])
     await message.answer("🏙️ Выберите ваш город:", reply_markup=keyboard)
+
+@dp.callback_query(F.data == "cancel_city_selection")
+async def cancel_city_selection(callback: CallbackQuery):
+    await callback.message.edit_text("Выбор города отменён.")
+    await callback.message.answer("Главное меню", reply_markup=user_keyboard())
+    await callback.answer()
 
 @dp.callback_query(F.data.startswith("city_"))
 async def city_selected(callback: CallbackQuery):
@@ -177,8 +210,20 @@ async def city_selected(callback: CallbackQuery):
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=f"{p['name']} — {p['price']} {CURRENCY}", callback_data=f"product_{p['id']}_{city}")]
         for p in available_products
-    ])
+    ] + [[InlineKeyboardButton(text="◀️ Назад к городам", callback_data="back_to_cities")]])
     await callback.message.edit_text(f"📦 Выберите товар для города {city}:", reply_markup=keyboard)
+    await callback.answer()
+
+@dp.callback_query(F.data == "back_to_cities")
+async def back_to_cities(callback: CallbackQuery):
+    if not data["cities"]:
+        await callback.message.edit_text("Список городов пуст.")
+        await callback.answer()
+        return
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=city, callback_data=f"city_{city}")] for city in data["cities"]
+    ] + [[InlineKeyboardButton(text="❌ Отмена", callback_data="cancel_city_selection")]])
+    await callback.message.edit_text("🏙️ Выберите ваш город:", reply_markup=keyboard)
     await callback.answer()
 
 @dp.callback_query(F.data.startswith("product_"))
@@ -232,6 +277,28 @@ async def product_selected(callback: CallbackQuery):
         f"🏙️ Город: {city}\n\n"
         f"Ожидайте подтверждения от оператора @{OPERATOR_USERNAME}. Сохраните номер заказа для связи.",
         parse_mode="Markdown"
+    )
+    await callback.answer()
+
+# ---------- Подтверждение заказа админом ----------
+@dp.callback_query(F.data.startswith("confirm_order_"))
+async def confirm_order(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("Вы не администратор!", show_alert=True)
+        return
+    order_id = int(callback.data.split("_")[2])
+    order = next((o for o in data["orders"] if o["id"] == order_id), None)
+    if not order:
+        await callback.answer("Заказ не найден.", show_alert=True)
+        return
+    if order["status"] != "ожидает подтверждения":
+        await callback.answer(f"Заказ уже {order['status']}", show_alert=True)
+        return
+    await update_order_status(order_id, "подтверждён", order["user_id"], notify_user=True)
+    await callback.message.edit_text(
+        f"✅ Заказ #{order_id} подтверждён!\n"
+        f"Покупатель уведомлён.",
+        reply_markup=None
     )
     await callback.answer()
 
@@ -289,17 +356,9 @@ async def promo_enter(message: Message):
 async def operator(message: Message):
     await message.answer(f"📞 Наш оператор: @{OPERATOR_USERNAME}")
 
-@dp.message(F.text == "❓ Помощь")
-async def help_user(message: Message):
-    text = (
-        "❓ **Помощь**\n\n"
-        "1. Нажмите **📦 Прайс** → выберите город → выберите товар.\n"
-        "2. Если баланса достаточно, товар покупается, вы получаете номер заказа.\n"
-        "3. Если баланса не хватает, пополните его через оператора.\n"
-        "4. Статус заказа можно отслеживать в **👤 Профиль**.\n"
-        "Промокоды вводите в разделе 🎟 Промокод."
-    )
-    await message.answer(text, parse_mode="Markdown")
+@dp.message(F.text == "🛟 Саппорт")
+async def support(message: Message):
+    await message.answer(f"🛟 Служба поддержки: @{OPERATOR_USERNAME}\nСвяжитесь с нами по любым вопросам.")
 
 # ========== АДМИН-ПАНЕЛЬ ==========
 @dp.message(Command("admin"))
@@ -395,7 +454,7 @@ async def edit_product_select(message: Message, state: FSMContext):
     if not data["products"]:
         await message.answer("Нет товаров для редактирования.")
         return
-    text = "📝 **Выберите товар:**\n"
+    text = "📝 **Выберите товар для редактирования:**\n"
     for p in data["products"]:
         text += f"ID: {p['id']} — {p['name']} ({p['price']} {CURRENCY})\n"
     text += "\nВведите ID товара:"
@@ -492,6 +551,37 @@ async def edit_product_save(message: Message, state: FSMContext):
     await message.answer(f"✅ Товар обновлён: {field} -> {value}", reply_markup=admin_keyboard())
     await state.clear()
 
+# ---------- Удаление товара ----------
+@dp.message(F.text == "🗑 Удалить товар")
+async def delete_product_start(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    if not data["products"]:
+        await message.answer("Нет товаров для удаления.")
+        return
+    text = "🗑 **Выберите ID товара для удаления:**\n"
+    for p in data["products"]:
+        text += f"ID: {p['id']} — {p['name']} ({p['price']} {CURRENCY})\n"
+    text += "\nВведите ID товара:"
+    await message.answer(text, parse_mode="Markdown")
+    await state.set_state(DeleteProduct.select_id)
+
+@dp.message(DeleteProduct.select_id)
+async def delete_product_confirm(message: Message, state: FSMContext):
+    if not message.text.isdigit():
+        await message.answer("Введите числовой ID.")
+        return
+    pid = int(message.text)
+    product = next((p for p in data["products"] if p["id"] == pid), None)
+    if not product:
+        await message.answer("Товар не найден.")
+        await state.clear()
+        return
+    data["products"].remove(product)
+    save_data(data)
+    await message.answer(f"✅ Товар **{product['name']}** удалён.", reply_markup=admin_keyboard())
+    await state.clear()
+
 # ---------- Управление городами ----------
 @dp.message(F.text == "🏙️ Города")
 async def manage_cities(message: Message):
@@ -551,34 +641,57 @@ async def add_city_name(message: Message, state: FSMContext):
     await message.answer(f"✅ Город **{city_name}** добавлен.")
     await state.clear()
 
-# ---------- Добавление баланса пользователю ----------
+# ---------- Добавление и списание баланса ----------
 @dp.message(F.text == "➕ Добавить баланс")
 async def add_balance_start(message: Message, state: FSMContext):
     if not is_admin(message.from_user.id):
         return
     await message.answer("Введите ID пользователя и сумму через пробел.\nПример: `8213390123 5000`", parse_mode="Markdown")
-    await state.set_state(AddBalanceState.user_id)
+    await state.set_state(BalanceOperation.user_id)
+    await state.update_data(operation="add")
 
-@dp.message(AddBalanceState.user_id)
-async def add_balance_amount(message: Message, state: FSMContext):
+@dp.message(F.text == "➖ Списать баланс")
+async def remove_balance_start(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    await message.answer("Введите ID пользователя и сумму для списания через пробел.\nПример: `8213390123 1000`", parse_mode="Markdown")
+    await state.set_state(BalanceOperation.user_id)
+    await state.update_data(operation="remove")
+
+@dp.message(BalanceOperation.user_id)
+async def balance_operation_amount(message: Message, state: FSMContext):
     parts = message.text.strip().split()
     if len(parts) != 2 or not parts[1].isdigit():
         await message.answer("Неверный формат. Введите ID и сумму через пробел.\nПример: `8213390123 5000`")
         return
     user_id = parts[0]
     amount = int(parts[1])
+    data_state = await state.get_data()
+    operation = data_state.get("operation")
     if user_id not in data["users"]:
         data["users"][user_id] = {
             "orders": [],
             "joined": datetime.now().isoformat(),
             "balance": 0
         }
-    data["users"][user_id]["balance"] += amount
+    if operation == "add":
+        data["users"][user_id]["balance"] += amount
+        action_text = f"начислено **{amount} {CURRENCY}**"
+    else:
+        if data["users"][user_id]["balance"] < amount:
+            await message.answer(f"❌ Недостаточно средств у пользователя. Баланс: {data['users'][user_id]['balance']} {CURRENCY}")
+            await state.clear()
+            return
+        data["users"][user_id]["balance"] -= amount
+        action_text = f"списано **{amount} {CURRENCY}**"
     save_data(data)
-    await message.answer(f"✅ Пользователю `{user_id}` начислено **{amount} {CURRENCY}**. Новый баланс: {data['users'][user_id]['balance']} {CURRENCY}", parse_mode="Markdown")
-    # Уведомляем пользователя о пополнении
+    await message.answer(f"✅ Пользователю `{user_id}` {action_text}. Новый баланс: {data['users'][user_id]['balance']} {CURRENCY}", parse_mode="Markdown")
+    # Уведомляем пользователя
     try:
-        await bot.send_message(int(user_id), f"💰 Ваш баланс пополнен на **{amount} {CURRENCY}**! Текущий баланс: {data['users'][user_id]['balance']} {CURRENCY}", parse_mode="Markdown")
+        if operation == "add":
+            await bot.send_message(int(user_id), f"💰 Ваш баланс пополнен на **{amount} {CURRENCY}**! Текущий баланс: {data['users'][user_id]['balance']} {CURRENCY}", parse_mode="Markdown")
+        else:
+            await bot.send_message(int(user_id), f"➖ С вашего баланса списано **{amount} {CURRENCY}** по решению администратора. Текущий баланс: {data['users'][user_id]['balance']} {CURRENCY}", parse_mode="Markdown")
     except:
         pass
     await state.clear()
@@ -604,7 +717,7 @@ async def broadcast_send(message: Message, state: FSMContext):
     await message.answer(f"✅ Рассылка отправлена {count} пользователям.", reply_markup=admin_keyboard())
     await state.clear()
 
-# ---------- Статистика и список товаров ----------
+# ---------- Статистика ----------
 @dp.message(F.text == "📊 Статистика")
 async def admin_stats(message: Message):
     if not is_admin(message.from_user.id):
