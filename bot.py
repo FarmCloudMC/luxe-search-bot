@@ -26,7 +26,7 @@ app = Client(
 )
 
 # ==================================================
-#                     ДАННЫЕ
+#                    ДАННЫЕ
 # ==================================================
 
 user_lengths = {}
@@ -35,40 +35,43 @@ running = {}
 letters = "abcdefghijklmnopqrstuvwxyz"
 
 # ==================================================
-#            КРАСИВЫЕ СЛОГИ / СЛОВА
+#             КРАСИВЫЕ ЧАСТИ
 # ==================================================
 
 parts = [
-    "lu", "xe", "zo", "ra", "ka", "mi", "no",
-    "ta", "vo", "xi", "ne", "sa", "re", "di",
-    "fa", "go", "ha", "ko", "la", "mo", "ni"
+    "lu", "xe", "zo", "ra", "ka",
+    "mi", "no", "ta", "vo", "xi",
+    "ne", "sa", "re", "di", "fa",
+    "go", "ha", "ko", "la", "mo",
+    "ni", "ro", "za", "ve", "xo"
 ]
 
-endings = [
-    "x", "z", "y", "n", "o", "a"
-]
+endings = ["x", "z", "y", "n", "o", "a"]
 
 # ==================================================
-#          УМНАЯ ГЕНЕРАЦИЯ USERNAME
+#         УМНАЯ ГЕНЕРАЦИЯ USERNAME
 # ==================================================
 
 def generate_username(length):
 
     mode = random.randint(1, 4)
 
-    # ==========================================
-    # БРЕНД-СТИЛЬ (luxe, zora, nexo)
-    # ==========================================
+    # ======================================
+    # БРЕНД-СТИЛЬ
+    # ======================================
 
     if mode == 1:
 
-        name = random.choice(parts) + random.choice(parts)
+        result = (
+            random.choice(parts) +
+            random.choice(parts)
+        )
 
-        return name[:length]
+        return result[:length]
 
-    # ==========================================
-    # СЛОГОВЫЙ СТИЛЬ
-    # ==========================================
+    # ======================================
+    # СЛОГОВЫЙ
+    # ======================================
 
     elif mode == 2:
 
@@ -79,19 +82,21 @@ def generate_username(length):
 
         return result[:length]
 
-    # ==========================================
-    # ПОВТОРЕНИЯ
-    # ==========================================
+    # ======================================
+    # ПОВТОРЫ
+    # ======================================
 
     elif mode == 3:
 
         char = random.choice(letters)
 
-        return (char * (length - 1)) + random.choice(endings)
+        return (
+            char * (length - 1)
+        ) + random.choice(endings)
 
-    # ==========================================
+    # ======================================
     # СИММЕТРИЯ
-    # ==========================================
+    # ======================================
 
     else:
 
@@ -112,19 +117,21 @@ def generate_username(length):
         )
 
 # ==================================================
-#           ПРОВЕРКА USERNAME
+#             ПРОВЕРКА USERNAME
 # ==================================================
 
 async def check_username(username):
 
     try:
 
-        await app.get_chat(username)
+        await app.resolve_peer(username)
 
+        # username существует
         return False
 
     except UsernameNotOccupied:
 
+        # свободен
         return True
 
     except UsernameInvalid:
@@ -133,16 +140,20 @@ async def check_username(username):
 
     except FloodWait as e:
 
+        print(f"FLOOD WAIT: {e.value}")
+
         await asyncio.sleep(e.value)
 
         return False
 
-    except:
+    except Exception as e:
+
+        print(f"ERROR: {e}")
 
         return False
 
 # ==================================================
-#               КЛАВИАТУРА
+#                КЛАВИАТУРА
 # ==================================================
 
 def keyboard():
@@ -158,7 +169,7 @@ def keyboard():
     )
 
 # ==================================================
-#               ПОИСК
+#                  ПОИСК
 # ==================================================
 
 async def search_loop(chat_id, message):
@@ -169,11 +180,13 @@ async def search_loop(chat_id, message):
 
         username = generate_username(length)
 
+        print(f"CHECKING: {username}")
+
         free = await check_username(username)
 
-        # ======================================
-        # ТОЛЬКО СВОБОДНЫЕ
-        # ======================================
+        # ==================================
+        # НАЙДЕН СВОБОДНЫЙ
+        # ==================================
 
         if free:
 
@@ -189,29 +202,29 @@ async def search_loop(chat_id, message):
 """
             )
 
-        # ======================================
-        # АНТИ FLOOD
-        # ======================================
+        # ==================================
+        # АНТИ-ФЛУД
+        # ==================================
 
-        await asyncio.sleep(0.8)
+        await asyncio.sleep(0.3)
 
 # ==================================================
-#                 START
+#                   START
 # ==================================================
 
 @app.on_message(filters.command("start"))
 async def start(_, message):
 
-    user_lengths[message.chat.id] = 5
+    user_lengths[message.chat.id] = 6
 
     text = """
 ✨ Добро пожаловать в Luxe Search
 
-🔍 Умный поиск красивых Telegram username
-💎 Генерация стильных username
-⚡ Проверка через Telegram API
+🔍 Умный поиск красивых username
+💎 Проверка через Telegram API
+⚡ Быстрый и стабильный поиск
 
-Выбери длину username ниже 👇
+Выбери длину username 👇
 """
 
     await message.reply(
@@ -220,7 +233,7 @@ async def start(_, message):
     )
 
 # ==================================================
-#              ОБРАБОТЧИК
+#                ОБРАБОТЧИК
 # ==================================================
 
 @app.on_message(filters.text)
@@ -229,9 +242,9 @@ async def handler(_, message):
     chat_id = message.chat.id
     text = message.text
 
-    # ==========================================
+    # ======================================
     # ВЫБОР ДЛИНЫ
-    # ==========================================
+    # ======================================
 
     if text == "✨ 5 символов":
 
@@ -257,16 +270,16 @@ async def handler(_, message):
             "🔥 Установлено: 7 символов"
         )
 
-    # ==========================================
+    # ======================================
     # СТАРТ
-    # ==========================================
+    # ======================================
 
     elif text == "🚀 Начать поиск":
 
         if running.get(chat_id):
 
             return await message.reply(
-                "⚠️ Поиск уже запущен"
+                "⚠️ Поиск уже работает"
             )
 
         running[chat_id] = True
@@ -275,7 +288,7 @@ async def handler(_, message):
             """
 🚀 Luxe Search запущен
 
-🔍 Начинаю поиск красивых username...
+🔍 Начинаю поиск username...
 """
         )
 
@@ -283,9 +296,9 @@ async def handler(_, message):
             search_loop(chat_id, message)
         )
 
-    # ==========================================
+    # ======================================
     # СТОП
-    # ==========================================
+    # ======================================
 
     elif text == "🛑 Остановить":
 
@@ -296,7 +309,7 @@ async def handler(_, message):
         )
 
 # ==================================================
-#                   RUN
+#                    RUN
 # ==================================================
 
 print("✨ LUXE SEARCH RUNNING ✨")
