@@ -1,13 +1,8 @@
 import asyncio
 import random
+import aiohttp
 
 from pyrogram import Client, filters
-from pyrogram.errors import (
-    UsernameNotOccupied,
-    UsernameInvalid,
-    FloodWait
-)
-
 from pyrogram.types import ReplyKeyboardMarkup
 
 # ==================================================
@@ -32,12 +27,7 @@ app = Client(
 user_lengths = {}
 running = {}
 
-letters = "abcdefghijklmnopqrstuvwxyz"
-
-# ==================================================
-#             КРАСИВЫЕ ЧАСТИ
-# ==================================================
-
+# красивые части
 parts = [
     "lu", "xe", "zo", "ra", "ka",
     "mi", "no", "ta", "vo", "xi",
@@ -46,20 +36,17 @@ parts = [
     "ni", "ro", "za", "ve", "xo"
 ]
 
-endings = ["x", "z", "y", "n", "o", "a"]
+letters = "abcdefghijklmnopqrstuvwxyz"
 
 # ==================================================
-#         УМНАЯ ГЕНЕРАЦИЯ USERNAME
+#             ГЕНЕРАЦИЯ USERNAME
 # ==================================================
 
 def generate_username(length):
 
     mode = random.randint(1, 4)
 
-    # ======================================
-    # БРЕНД-СТИЛЬ
-    # ======================================
-
+    # бренд стиль
     if mode == 1:
 
         result = (
@@ -69,10 +56,7 @@ def generate_username(length):
 
         return result[:length]
 
-    # ======================================
-    # СЛОГОВЫЙ
-    # ======================================
-
+    # слоговый
     elif mode == 2:
 
         result = ""
@@ -82,22 +66,16 @@ def generate_username(length):
 
         return result[:length]
 
-    # ======================================
-    # ПОВТОРЫ
-    # ======================================
-
+    # повторения
     elif mode == 3:
 
         char = random.choice(letters)
 
         return (
             char * (length - 1)
-        ) + random.choice(endings)
+        ) + random.choice(letters)
 
-    # ======================================
-    # СИММЕТРИЯ
-    # ======================================
-
+    # симметрия
     else:
 
         half = length // 2
@@ -117,39 +95,59 @@ def generate_username(length):
         )
 
 # ==================================================
-#             ПРОВЕРКА USERNAME
+#           ПРОВЕРКА TELEGRAM
 # ==================================================
 
-async def check_username(username):
+async def check_telegram(session, username):
 
     try:
 
-        await app.resolve_peer(username)
+        url = f"https://t.me/{username}"
 
-        # username существует
+        async with session.get(url) as r:
+
+            text = await r.text()
+
+            text = text.lower()
+
+            # свободный username
+            if (
+                "if you have telegram" not in text
+                and "preview channel" not in text
+                and "preview chat" not in text
+            ):
+                return True
+
+            return False
+
+    except:
         return False
 
-    except UsernameNotOccupied:
+# ==================================================
+#           ПРОВЕРКА FRAGMENT
+# ==================================================
 
-        # свободен
-        return True
+async def check_fragment(session, username):
 
-    except UsernameInvalid:
+    try:
 
-        return False
+        url = f"https://fragment.com/username/{username}"
 
-    except FloodWait as e:
+        async with session.get(url) as r:
 
-        print(f"FLOOD WAIT: {e.value}")
+            text = await r.text()
 
-        await asyncio.sleep(e.value)
+            text = text.lower()
 
-        return False
+            if "available" in text:
+                return True
 
-    except Exception as e:
+            if r.status == 404:
+                return True
 
-        print(f"ERROR: {e}")
+            return False
 
+    except:
         return False
 
 # ==================================================
@@ -169,47 +167,51 @@ def keyboard():
     )
 
 # ==================================================
-#                  ПОИСК
+#                   ПОИСК
 # ==================================================
 
 async def search_loop(chat_id, message):
 
-    while running.get(chat_id):
+    async with aiohttp.ClientSession() as session:
 
-        length = user_lengths.get(chat_id, 5)
+        while running.get(chat_id):
 
-        username = generate_username(length)
+            length = user_lengths.get(chat_id, 6)
 
-        print(f"CHECKING: {username}")
+            username = generate_username(length)
 
-        free = await check_username(username)
+            print(f"CHECKING: {username}")
 
-        # ==================================
-        # НАЙДЕН СВОБОДНЫЙ
-        # ==================================
+            tg = await check_telegram(
+                session,
+                username
+            )
 
-        if free:
+            fr = await check_fragment(
+                session,
+                username
+            )
 
-            await message.reply(
-                f"""
+            # только полностью свободные
+            if tg and fr:
+
+                await message.reply(
+                    f"""
 ✨ LUXE SEARCH
 
 🎉 Найден свободный username
 
 👤 @{username}
 
-💎 Статус: свободен
+📱 Telegram: свободен
+💎 Fragment: свободен
 """
-            )
+                )
 
-        # ==================================
-        # АНТИ-ФЛУД
-        # ==================================
-
-        await asyncio.sleep(0.3)
+            await asyncio.sleep(0.5)
 
 # ==================================================
-#                   START
+#                    START
 # ==================================================
 
 @app.on_message(filters.command("start"))
@@ -217,23 +219,21 @@ async def start(_, message):
 
     user_lengths[message.chat.id] = 6
 
-    text = """
+    await message.reply(
+        """
 ✨ Добро пожаловать в Luxe Search
 
 🔍 Умный поиск красивых username
-💎 Проверка через Telegram API
-⚡ Быстрый и стабильный поиск
+💎 Проверка Telegram + Fragment
+⚡ Стильные username
 
-Выбери длину username 👇
-"""
-
-    await message.reply(
-        text,
+Выбери длину 👇
+""",
         reply_markup=keyboard()
     )
 
 # ==================================================
-#                ОБРАБОТЧИК
+#                 ОБРАБОТКА
 # ==================================================
 
 @app.on_message(filters.text)
@@ -241,10 +241,6 @@ async def handler(_, message):
 
     chat_id = message.chat.id
     text = message.text
-
-    # ======================================
-    # ВЫБОР ДЛИНЫ
-    # ======================================
 
     if text == "✨ 5 символов":
 
@@ -270,10 +266,6 @@ async def handler(_, message):
             "🔥 Установлено: 7 символов"
         )
 
-    # ======================================
-    # СТАРТ
-    # ======================================
-
     elif text == "🚀 Начать поиск":
 
         if running.get(chat_id):
@@ -288,17 +280,13 @@ async def handler(_, message):
             """
 🚀 Luxe Search запущен
 
-🔍 Начинаю поиск username...
+🔍 Начинаю поиск...
 """
         )
 
         asyncio.create_task(
             search_loop(chat_id, message)
         )
-
-    # ======================================
-    # СТОП
-    # ======================================
 
     elif text == "🛑 Остановить":
 
@@ -309,7 +297,7 @@ async def handler(_, message):
         )
 
 # ==================================================
-#                    RUN
+#                      RUN
 # ==================================================
 
 print("✨ LUXE SEARCH RUNNING ✨")
